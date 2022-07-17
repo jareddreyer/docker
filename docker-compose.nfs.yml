@@ -1,0 +1,64 @@
+version: "3.5"
+services:
+  sample-www:
+    build:
+      context: .docker/www
+      dockerfile: .docker/www/Dockerfile8.0
+      args:
+        PHP_VERSION: ${PHP_VERSION}
+        SITE_URL: ${SITE_URL}
+    container_name: sample-www
+    ports:
+      - "${WWW_HTTP_PORT}:80"
+      - "${WWW_HTTPS_PORT}:443"
+      - 8983:8983
+    volumes:
+      - sample-nfsmount:/var/www/html
+    networks:
+      - sample
+  sample-mysql:
+    image: mysql:5.7
+    container_name: sample-mysql
+    ports:
+      - "${SS_DATABASE_LOCAL_PORT}:3306"
+    volumes:
+      - sample-mysqldata:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${SS_DATABASE_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${SS_DATABASE_NAME}
+      - MYSQL_USER=${SS_DATABASE_USERNAME}
+      - MYSQL_PASSWORD=${SS_DATABASE_PASSWORD}
+      - TZ=${TZ}
+    networks:
+      - sample
+  sample-redis:
+    image: redis:alpine
+    container_name: sample-redis
+    volumes:
+      - sample-redisdata:/data
+    networks:
+      - sample
+  sample-mailhog:
+    image: mailhog/mailhog:latest
+    container_name: sample-mailhog
+    ports:
+      - "${DEV_MAILER_PORT}:8025"
+      - "1025:1025"
+    networks:
+      - sample
+
+networks:
+  sample:
+    driver: "bridge"
+
+volumes:
+  sample-mysqldata:
+    driver: "local"
+  sample-redisdata:
+    driver: "local"
+  sample-nfsmount:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=host.docker.internal,rw,nolock,hard,nointr,nfsvers=3
+      device: ":${PWD}"

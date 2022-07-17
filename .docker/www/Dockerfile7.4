@@ -1,0 +1,89 @@
+FROM ubuntu:20.04
+
+RUN apt-get update \
+    && apt-get install -y locales \
+    && locale-gen en_US.UTF-8
+
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US:en
+ENV LC_ALL en_US.UTF-8
+ENV DEBIAN_FRONTEND noninteractive
+ENV TZ=Pacific/Auckland
+
+# install deps, apache, php and php modules all in one run and clean up afterwards to reduce the snapshot size
+RUN apt-get update \
+    && apt-get install -y nginx curl ufw net-tools sudo zip unzip telnet vim nano \
+    && apt-get install -y  git software-properties-common supervisor sqlite3 default-jre \
+    && add-apt-repository -y ppa:ondrej/php \
+    && apt-get update \
+    && apt-get install -y iputils-ping php7.4-fpm php7.4-cli php7.4-gd php7.4-mysql php7.4-bcmath \
+    php7.4-intl php7.4-zip php7.4-sqlite3 php7.4-imap php-memcached php7.4-mbstring php7.4-xml php7.4-opcache \
+    php7.4-curl php7.4-xdebug php7.4-tidy libxml2-dev php7.4-soap php7.4-imagick libmagickwand-dev \
+    && php -r "readfile('http://getcomposer.org/installer');" | php -- --install-dir=/usr/bin/ --filename=composer \
+    && mkdir /run/php \
+    && apt-get remove -y --purge software-properties-common \
+    && apt-get -y autoremove \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    && echo "daemon off;" >> /etc/nginx/nginx.conf \
+    && ln -sf /dev/stdout /var/log/nginx/access.log \
+    && ln -sf /dev/stderr /var/log/nginx/error.log
+
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+COPY conf/7.4/php-fpm.conf /etc/php/7.4/fpm/php-fpm.conf
+COPY conf/xdebug.ini /etc/php/7.4/mods-available/xdebug.ini
+COPY conf/7.4/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY conf/7.4/default.conf /etc/nginx/sites-available/default
+COPY conf/7.4/www.conf /etc/php/7.4/fpm/pool.d/www.conf
+COPY github-oauth.json /root/.composer/auth.json
+
+# tweak php-fpm config
+RUN sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 100M/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/post_max_size = 8M/post_max_size = 101M/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/;date.timezone =/date.timezone = Pacific\/Auckland/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/memory_limit = 128M/memory_limit = -1/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/;extension=intl/extension=intl/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/;extension=tidy/extension=tidy/g' /etc/php/7.4/fpm/php.ini
+
+# tweak php-fpm config for opcache
+RUN sed -i 's/;opcache.enable=1/opcache.enable=1/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/;opcache.memory_consumption=128/opcache.memory_consumption=128/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/;opcache.interned_strings_buffer=8/opcache.interned_strings_buffer=8/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/;opcache.max_accelerated_files=10000/opcache.max_accelerated_files=10000/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/;opcache.revalidate_freq=2/opcache.revalidate_freq=0/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/;opcache.fast_shutdown=1/opcache.fast_shutdown=1/g' /etc/php/7.4/fpm/php.ini && \
+    sed -i 's/;opcache.force_restart_timeout=180/opcache.force_restart_timeout=180/g' /etc/php/7.4/fpm/php.ini
+
+
+RUN echo 'alias build="vendor/bin/sake dev/build flush=all"' >> ~/.bashrc && \
+    echo 'alias flush="rm -rf silverstripe-cache/* silverstripe-cachinclude/cache/* silverstripe-redirects/cache/*"' >> ~/.bashrc && \
+    echo 'alias expose="composer vendor-expose"' >> ~/.bashrc && \
+    echo 'alias autoload="composer dump-autoload"' >> ~/.bashrc && \
+    echo 'alias compose="composer install"' >> ~/.bashrc  && \
+    echo 'alias standards="composer silverstripe-standards"' >> ~/.bashrc  && \
+    echo 'alias phpcs="composer phpcs-fix"' >> ~/.bashrc  && \
+    echo 'alias test="vendor/bin/phpunit"' >> ~/.bashrc && \
+    echo 'alias sake="vendor/bin/sake"' >> ~/.bashrc && \
+    echo 'alias clearJobs="sake dev/tasks/Symbiote-QueuedJobs-Tasks-DeleteAllJobsTask confirm=1"' >> ~/.bashrc && \
+    echo 'alias refresh="test vendor/silverstripe/framework/tests '' flush=1 "' >> ~/.bashrc && \
+    echo 'alias ondebug="sudo phpenmod -vs cli xdebug"' >> ~/.bashrc  && \
+    echo 'alias offdebug="sudo phpdismod -vs cli xdebug"' >> ~/.bashrc && \
+    echo 'alias restart="sudo service php7.4-fpm restart"' >> ~/.bashrc && \
+    echo 'alias compose1="composer self-update 1.10.17"' >> ~/.bashrc && \
+    echo 'alias compose2="composer self-update --rollback"' >> ~/.bashrc && \
+    echo 'alias qwerty="sake dev/tasks/ProcessJobQueueTask"' >> ~/.bashrc && \
+	echo 'alias sconfig="sake dev/tasks/SearchConfigure"' >> ~/.bashrc && \
+	echo 'alias reindex="sake dev/tasks/SearchReindex"' >> ~/.bashrc
+
+RUN mkdir /var/www/html/silverstripe-cache &&  \
+    sudo chmod -R ug+w /var/www/html/silverstripe-cache && \
+    mkdir /var/www/html/logs && sudo chmod -R 777 /var/www/html/logs && \
+    mkdir /var/www/html/logs/xdebug  && sudo chmod -R 777 /var/www/html/logs/xdebug && \
+    touch /var/www/html/logs/xdebug/remote.log
+
+EXPOSE 80 443
+
+CMD "/usr/bin/supervisord"
+
+WORKDIR /var/www/html
