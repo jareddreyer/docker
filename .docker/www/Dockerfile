@@ -31,6 +31,9 @@ RUN apt-get update \
 
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
+# update to use php 8.0
+RUN sudo update-alternatives --set php /usr/bin/php8.0
+
 COPY conf/8.0/php-fpm.conf /etc/php/8.0/fpm/php-fpm.conf
 COPY conf/xdebug.ini /etc/php/8.0/mods-available/xdebug.ini
 COPY conf/8.0/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
@@ -72,18 +75,9 @@ RUN mkdir /var/www/html/silverstripe-cache &&  \
     mkdir /var/www/html/logs/xdebug  && sudo chmod -R 777 /var/www/html/logs/xdebug && \
     touch /var/www/html/logs/xdebug/remote.log
 
-RUN echo 'alias ondebug="sudo phpenmod -s cli xdebug"' >> ~/.bashrc  && \
-	echo 'alias offdebug="sudo phpdismod -s cli xdebug"' >> ~/.bashrc && \
-	echo 'alias compose1="composer self-update 1.10.17"' >> ~/.bashrc && \
-	echo 'alias compose2="composer self-update --rollback"' >> ~/.bashrc && \
-	echo 'alias qwerty="sake dev/tasks/ProcessJobQueueTask"' >> ~/.bashrc && \
-	echo 'alias sconfig="sake dev/tasks/SearchConfigure"' >> ~/.bashrc && \
-	echo 'alias reindex="sake dev/tasks/SearchReindex"' >> ~/.bashrc
-
 # tweak php-fpm config for opcache
 #RUN sed -i 's/opcache.enable=1/;opcache.enable=1/g' /etc/php/8.0/fpm/php.ini && \
 #    sed -i 's/opcache.revalidate_freq=2/opcache.revalidate_freq=0/g' /etc/php/8.0/fpm/php.ini \
-
 
 EXPOSE 80 443
 
