@@ -13,12 +13,12 @@ ENV TZ=Pacific/Auckland
 # install deps, apache, php and php modules all in one run and clean up afterwards to reduce the snapshot size
 RUN apt-get update \
     && apt-get install -y nginx curl ufw net-tools sudo zip unzip telnet vim nano \
-    && apt-get install -y git software-properties-common supervisor sqlite3 default-jre \
+    && apt-get install -y  git software-properties-common supervisor sqlite3 default-jre \
     && add-apt-repository -y ppa:ondrej/php \
     && apt-get update \
-    && apt-get install -y iputils-ping php8.1-fpm php8.1-cli php8.1-gd php8.1-mysql php8.1-bcmath \
-    php8.1-intl php8.1-zip php8.1-sqlite3 php8.1-imap php-memcached php8.1-mbstring php8.1-xml php8.1-opcache \
-    php8.1-curl php8.1-xdebug php8.1-pcov php8.1-tidy libxml2-dev php8.1-soap php8.1-imagick libmagickwand-dev \
+    && apt-get install -y iputils-ping php8.0-fpm php8.0-cli php8.0-gd php8.0-mysql php8.0-bcmath \
+    php8.0-intl php8.0-zip php8.0-sqlite3 php8.0-imap php-memcached php8.0-mbstring php8.0-xml php8.0-opcache \
+    php8.0-curl php8.0-xdebug php8.0-pcov php8.0-tidy libxml2-dev php8.0-soap php8.0-imagick libmagickwand-dev \
     && php -r "readfile('http://getcomposer.org/installer');" | php -- --install-dir=/usr/bin/ --filename=composer \
     && mkdir /run/php \
     && apt-get remove -y --purge software-properties-common \
@@ -31,23 +31,23 @@ RUN apt-get update \
 
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# update to use php 8.1
-RUN sudo update-alternatives --set php /usr/bin/php8.1
+# update to use php 8.0
+RUN sudo update-alternatives --set php /usr/bin/php8.0
 
-COPY conf/8.1/php-fpm.conf /etc/php/8.1/fpm/php-fpm.conf
-COPY conf/xdebug.ini /etc/php/8.1/mods-available/xdebug.ini
-COPY conf/8.1/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY conf/8.1/default.conf /etc/nginx/sites-available/default
-COPY conf/8.1/www.conf /etc/php/8.1/fpm/pool.d/www.conf
-COPY github-oauth.json /root/.config/auth.json
+COPY conf/8.0/php-fpm.conf /etc/php/8.0/fpm/php-fpm.conf
+COPY conf/xdebug.ini /etc/php/8.0/mods-available/xdebug.ini
+COPY conf/8.0/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY conf/8.0/default.conf /etc/nginx/sites-available/default
+COPY conf/8.0/www.conf /etc/php/8.0/fpm/pool.d/www.conf
+COPY github-oauth.json /root/.composer/auth.json
 
 # tweak php-fpm config
-RUN sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 100M/g' /etc/php/8.1/fpm/php.ini && \
-    sed -i 's/post_max_size = 8M/post_max_size = 101M/g' /etc/php/8.1/fpm/php.ini && \
-    sed -i 's/;date.timezone =/date.timezone = Pacific\/Auckland/g' /etc/php/8.1/fpm/php.ini && \
-    sed -i 's/memory_limit = 128M/memory_limit = -1/g' /etc/php/8.1/fpm/php.ini && \
-    sed -i 's/;extension=intl/extension=intl/g' /etc/php/8.1/fpm/php.ini && \
-    sed -i 's/;extension=tidy/extension=tidy/g' /etc/php/8.1/fpm/php.ini
+RUN sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 100M/g' /etc/php/8.0/fpm/php.ini && \
+    sed -i 's/post_max_size = 8M/post_max_size = 101M/g' /etc/php/8.0/fpm/php.ini && \
+    sed -i 's/;date.timezone =/date.timezone = Pacific\/Auckland/g' /etc/php/8.0/fpm/php.ini && \
+    sed -i 's/memory_limit = 128M/memory_limit = -1/g' /etc/php/8.0/fpm/php.ini && \
+    sed -i 's/;extension=intl/extension=intl/g' /etc/php/8.0/fpm/php.ini && \
+    sed -i 's/;extension=tidy/extension=tidy/g' /etc/php/8.0/fpm/php.ini
 
 RUN echo 'alias build="vendor/bin/sake dev/build flush=all"' >> ~/.bashrc && \
     echo 'alias flush="rm -rf silverstripe-cache/* silverstripe-cachinclude/cache/* silverstripe-redirects/cache/*"' >> ~/.bashrc && \
@@ -62,7 +62,7 @@ RUN echo 'alias build="vendor/bin/sake dev/build flush=all"' >> ~/.bashrc && \
     echo 'alias refresh="test vendor/silverstripe/framework/tests '' flush=1 "' >> ~/.bashrc && \
     echo 'alias ondebug="sudo phpenmod -vs cli xdebug"' >> ~/.bashrc  && \
     echo 'alias offdebug="sudo phpdismod -vs cli xdebug"' >> ~/.bashrc && \
-    echo 'alias restart="sudo service php8.1-fpm restart"' >> ~/.bashrc && \
+    echo 'alias restart="sudo service php8.0-fpm restart"' >> ~/.bashrc && \
     echo 'alias compose1="composer self-update 1.10.17"' >> ~/.bashrc && \
     echo 'alias compose2="composer self-update --rollback"' >> ~/.bashrc && \
     echo 'alias qwerty="sake dev/tasks/ProcessJobQueueTask"' >> ~/.bashrc && \
@@ -70,11 +70,15 @@ RUN echo 'alias build="vendor/bin/sake dev/build flush=all"' >> ~/.bashrc && \
     echo 'alias sstmpdbclear="sake dev/tasks/CleanupTestDatabasesTask"' >> ~/.bashrc  && \
 	echo 'alias reindex="sake dev/tasks/SearchReindex"' >> ~/.bashrc
 
-RUN mkdir /var/www/html/silverstripe-cache && \
+RUN mkdir /var/www/html/silverstripe-cache &&  \
     sudo chmod -R ug+w /var/www/html/silverstripe-cache && \
     mkdir /var/www/html/logs && sudo chmod -R 777 /var/www/html/logs && \
     mkdir /var/www/html/logs/xdebug  && sudo chmod -R 777 /var/www/html/logs/xdebug && \
     touch /var/www/html/logs/xdebug/remote.log
+
+# tweak php-fpm config for opcache
+#RUN sed -i 's/opcache.enable=1/;opcache.enable=1/g' /etc/php/8.0/fpm/php.ini && \
+#    sed -i 's/opcache.revalidate_freq=2/opcache.revalidate_freq=0/g' /etc/php/8.0/fpm/php.ini \
 
 EXPOSE 80 443
 
