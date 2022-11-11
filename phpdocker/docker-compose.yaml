@@ -1,0 +1,29 @@
+###############################################################################
+#                          Generated on phpdocker.io                          #
+###############################################################################
+version: "3.4"
+services:
+  redis:
+    image: redis:alpine
+
+  webserver:
+    image: phpdockerio/nginx-pagespeed:latest
+    working_dir: /application
+    volumes:
+      - .:/application
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./infrastructure/nginx/pagespeed.conf:/etc/nginx/pagespeed.conf
+      - ./infrastructure/local/:/etc/ssl/local/
+    ports:
+      - "10000:443"
+
+  php-fpm:
+    build:
+      dockerfile: Dockerfile
+      target: backend-dev
+      context: .
+    working_dir: /application
+    volumes:
+      - .:/application
+      - ./infrastructure/php-fpm/php-ini-overrides.ini:/etc/php/8.0/fpm/conf.d/99-overrides.ini
+      - ~/.cache/composer:/root/.composer/cache

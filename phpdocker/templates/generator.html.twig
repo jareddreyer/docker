@@ -1,0 +1,116 @@
+{% form_theme form 'form_layout.html.twig' %}
+{% extends 'layout.html.twig' %}
+
+{% set activePage = 'generator' %}
+{% block pageTitle %} - Generator{% endblock %}
+
+{% set formGroupClass = 'group' %}
+
+{% set bigColumn = 'col col-lg-12 col-md-12 col-sm-12 col-xs-12' %}
+{% set quarterColumn = 'col col-lg-3 col-md-3 col-sm-12 col-xs-12' %}
+{% set tripleColumn = 'col col-lg-4 col-md-4 col-sm-12 col-xs-12' %}
+{% set halfColumn = 'col col-lg-6 col-md-6' %}
+
+{% block body %}
+    <form method="post" id="generator" action="{{ path('generator') }}">
+        <div class="row">
+            {{ form_errors(form) }}
+        </div>
+
+        <div class="row">
+            <div class="{{ formGroupClass }} {{ bigColumn }}">
+                <h3>Global configuration</h3>
+                <div class="row">
+                    {% for field in ['appPath', 'dockerWorkingDir'] %}
+                        <div class="col {{ halfColumn }}"
+                             id="container_for_{{ field }}">{{ form_row(attribute(form.globalOptions, field)) }}
+                        </div>
+                    {% endfor %}
+                </div>
+                <div class="row">
+                    <div class="col  {{ halfColumn }}">
+                        <div id="container_for_{{ 'appleM1Chip' }}">{{ form_row(attribute(form.globalOptions, 'appleM1Chip')) }}</div>
+                        <div class="note">Only change value if you are using Mac with Apple Chip (m1)</div> <br/>
+                    </div>
+                    <div class="col  {{ halfColumn }}">
+                        <div id="container_for_{{ 'basePort' }}">{{ form_row(attribute(form.globalOptions, 'basePort')) }}</div>
+                        <div class="note">Initial port for services exposed from docker to your machine</div> <br/>
+                    </div>
+                    <div class="col  {{ halfColumn }}">
+                        <div id="container_for_{{ 'projectName' }}">{{ form_row(attribute(form.globalOptions, 'projectName')) }}</div>
+                        <div class="note">Will be the name of docker folder + services</div> <br/>
+                    </div>
+                    <div class="col  {{ halfColumn }}">
+                        <div id="container_for_{{ 'nfsVersion' }}">{{ form_row(attribute(form.globalOptions, 'nfsVersion')) }}</div>
+                        <div class="note">Docker NFS mount (enable value: 3 or 4)</div> <br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="{{ formGroupClass }} col col-lg-9 col-md-9 col-sm-12 col-xs-12">
+                <h3>PHP configuration</h3>
+
+                <div class="{{ halfColumn }}">
+                    {{ form_row(attribute(form.phpOptions, 'version')) }}
+                    {{ form_row(attribute(form.phpOptions, 'frontControllerPath')) }}
+                    {{ form_row(attribute(form.phpOptions, 'hasGit')) }}
+
+                    <div class="note">
+                        <p>Please note:</p>
+                        <ul>
+                            <li>Extensions already included on base image: APC,
+                                cURL, JSON, Sodium, MBString, OPCache, Readline, XML and Zip.
+                            </li>
+                            <li>Each PHP version supports a different set of extensions to the others.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="{{ halfColumn }}">
+                    {{ form_row(attribute(form.phpOptions, 'phpExtensions81')) }}
+
+                    {{ form_row(attribute(form.phpOptions, 'phpExtensions80')) }}
+
+                    {{ form_row(attribute(form.phpOptions, 'phpExtensions74')) }}
+                </div>
+            </div>
+            <div class="{{ formGroupClass }} col  {{ quarterColumn }}">
+                <h3>MySQL</h3>
+                {{ form_widget(attribute(form.mysqlOptions, 'hasMysql')) }}
+
+                <div id="mysql-options">
+                    {% for field in ['version', 'rootPassword', 'databaseName', 'username', 'password'] %}
+                        {% if (attribute(form.mysqlOptions, field) is defined) %}
+                            <div id="container_for_mysql_{{ field }}">{{ form_row(attribute(form.mysqlOptions, field)) }}</div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+         <div class="row">
+            <div class="{{ formGroupClass }} {{ halfColumn }}">
+                <h3>Mailhog</h3>
+                {{ form_widget(attribute(form,  'hasMailhog')) }}
+            </div>
+
+            <div class="{{ formGroupClass }} {{ halfColumn }}">
+                <h3>Elasticsearch</h3>
+                {{ form_widget(attribute(form.elasticsearchOptions, 'hasElasticsearch')) }}
+            </div>
+        </div>
+
+        {{ form_rest(form) }}
+
+        <div class="row">
+            <div class="col col-lg-4 col-lg-offset-4">
+                <div class="text-center">
+                    <input type="submit" class="btn button-custom btn-custom-three shadow"
+                           value="Generate project archive">
+                </div>
+            </div>
+        </div>
+    </form>
+{% endblock %}

@@ -1,0 +1,17 @@
+---
+Name: dev-email-config
+After:
+  - "#emailconfig"
+Only:
+  environment: dev
+---
+SilverStripe\Core\Injector\Injector:
+  Swift_Transport:
+    class: Swift_SmtpTransport
+    properties:
+      Host:  "`DEV_MAILER_HOST`"
+      Port: 1025
+    calls:
+      Username: [setUsername, ["`DEV_MAILER_USERNAME`"]]
+      Password: [setPassword, ["`DEV_MAILER_PASSWORD`"]]
+      AuthMode: [setAuthMode, ["login"]]

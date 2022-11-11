@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en" class="no-js">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+    <meta name="description"
+          content="{% block pageDescription %}PHPDocker.io is a PHP development environment generator built with Docker containers{% endblock %}"/>
+    <meta name="author" content="PHPDocker.io"/>
+    <meta name="keywords" content="PHP, Docker, development, environment, generator, phpdocker">
+
+    <!--[if IE]>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <![endif]-->
+    <title>PHPDocker.io{% block pageTitle %}{% endblock %}</title>
+
+    {% include 'analytics.html.twig' %}
+
+    <link rel="stylesheet" href="/vendor/bootstrap/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="/vendor/font-awesome/css/font-awesome.min.css"/>
+    <link rel="stylesheet" href="/css/base.css"/>
+    <link rel="stylesheet" href="/css/media-queries.css"/>
+    <link rel="stylesheet" href="/css/dark.css"/>
+    <link rel="stylesheet" href="/vendor/bootstrap-multiselect/dist/css/bootstrap-multiselect.css"/>
+    <link rel="stylesheet" href="/vendor/bootstrap-toggle/css/bootstrap-toggle.css"/>
+    <link rel="stylesheet" href="/vendor/jquery-ui/themes/smoothness/jquery-ui.min.css"/>
+</head>
+
+<body data-target="#menu-section">
+
+<div id="wrap">
+    <!-- Header -->
+    <section id="header" class="inner-shadow-bottom">
+        <a href="{{ path('home') }}">
+            <h1> SS-PHP-Docker.io </h1>
+        </a>
+        <p>A PHP development environment generator built with Docker containers.</p>
+    </section>
+    <!-- End header -->
+
+    <!-- Content -->
+    <section id="content">
+        <div class="container-fluid">
+            {% block body %}{% endblock %}
+        </div>
+    </section>
+    <!-- End of content -->
+</div>
+ <!--
+<footer class="inner-shadow-top container-fluid">
+    <div class="row">
+        <div class="copyright col col-lg-6 col-md-6 col-sm-6 col-xs-12">
+            <a href="{{ path('home') }}">PHPDocker.io &copy; {{ "now"|date("Y") }}</a>
+        </div>
+        <div class="share col col-lg-6 col-md-6 col-sm-6 col-xs-12 rig">
+            <span class="github-link">
+                <a class="" href="https://github.com/phpdocker-io/phpdocker.io" target="_blank">
+                    <span class="fa fa-github"></span> Github
+                </a>
+            </span>
+        </div>
+    </div>
+</footer>
+-->
+
+<link property="stylesheet" rel="stylesheet" href="https://fonts.googleapis.com/css?family=Hind"/>
+
+<script src="/vendor/jquery/dist/jquery.min.js"></script>
+<script src="/vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+<script src="/vendor/jquery-ui/jquery-ui.min.js"></script>
+<script src="/vendor/bootstrap-multiselect/dist/js/bootstrap-multiselect.js"></script>
+<script src="/vendor/bootstrap-toggle/js/bootstrap-toggle.js"></script>
+<script src="/js/main-form.js"></script>
+<script src="/js/tools.js"></script>
+
+</body>
+</html>

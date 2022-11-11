@@ -1,0 +1,34 @@
+# This is the base image coming from DockerHUB
+# Image generated from https://github.com/silverstripeltd/bespoke-docker-base
+FROM markajadriano/ubuntu20-nginx-php8:m1
+
+ARG SITE_URL
+ENV CERT="/C=NZ/ST=Wellington/L=SilverStripe/O=NinjaFoxes/CN=${SITE_URL}"
+
+{% if packages %}
+RUN apt-get update; \
+    apt-get -y --no-install-recommends install \
+        {{ packages | join(' \\ \n        ') }}; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/*
+{% endif %}
+
+# Add SSL Cert
+RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/nginx-selfsigned.key -out /etc/ssl/certs/nginx-selfsigned.crt \
+	-subj ${CERT} \
+	&& openssl dhparam -out /etc/ssl/certs/dhparam.pem 2048
+
+COPY snippets/self-signed.conf /etc/nginx/snippets/self-signed.conf
+COPY snippets/ssl-params.conf /etc/nginx/snippets/ssl-params.conf
+
+# Additional NGINX/PHP version configuration
+COPY conf/www.conf /etc/php/{{ phpVersion }}/fpm/pool.d/www.conf
+COPY conf/nginx.conf /etc/nginx/sites-available/default
+RUN sed -i "s/local.site/${SITE_URL}/g" /etc/nginx/sites-available/default
+
+# Switch to PHP {{ phpVersion }}
+# RUN sudo update-alternatives --set php /usr/bin/php{{ phpVersion }}
+
+WORKDIR "{{ dockerWorkingDir }}"
+
+CMD "/usr/bin/supervisord"

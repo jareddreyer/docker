@@ -1,0 +1,1749 @@
+#!/usr/bin/env bash
+###############################################################################
+#     __               __
+#    / /_  ____  _____/ /______
+#   / __ \/ __ \/ ___/ __/ ___/
+#  / / / / /_/ (__  ) /_(__  )
+# /_/ /_/\____/____/\__/____/
+#
+# A program for managing host file entries.
+#
+# https://github.com/xwmx/hosts
+#
+# Based on Bash Boilerplate: https://github.com/xwmx/bash-boilerplate
+#
+# The MIT License (MIT)
+#
+# Copyright (c) 2015 William Melody • hi@williammelody.com
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+###############################################################################
+
+###############################################################################
+# Strict Mode
+###############################################################################
+
+set -o nounset
+set -o errexit
+set -o pipefail
+set -o noglob
+IFS=$'\n\t'
+
+###############################################################################
+# Environment & Globals
+###############################################################################
+
+# $_VERSION
+#
+# The most recent program version.
+_VERSION="3.6.4"
+
+# $_ME
+#
+# This program's basename.
+_ME="$(basename "${0}")"
+
+# $HOSTS_DEFAULT_SUBCOMMAND
+#
+# The command to be run by default, when no command name is specified.
+[[ -n "${HOSTS_DEFAULT_COMMAND:-}" ]] &&
+  HOSTS_DEFAULT_SUBCOMMAND="${HOSTS_DEFAULT_COMMAND}"
+HOSTS_DEFAULT_SUBCOMMAND="${HOSTS_DEFAULT_SUBCOMMAND:-list}"
+
+# $HOSTS_PATH
+#
+# The path to the hosts file. This will almost always be /etc/hosts
+HOSTS_PATH="${HOSTS_PATH:-/etc/hosts}"
+
+# $_REPO
+#
+# The <user>/<repo> identifier for the git repository.
+_REPO="xwmx/hosts"
+
+# $_REPO_RAW_URL
+#
+# The base URL for raw files.
+_REPO_RAW_URL="https://raw.githubusercontent.com/${_REPO}/master"
+
+###############################################################################
+# Debug
+###############################################################################
+
+# _debug()
+#
+# Usage:
+#   _debug printf "Debug info. Variable: %s\\n" "$0"
+#
+# A simple function for executing a specified command if the `$_USE_DEBUG`
+# variable has been set. The command is expected to print a message and
+# should typically be either `echo`, `printf`, or `cat`.
+__DEBUG_COUNTER=0
+_debug() {
+  if [[ "${_USE_DEBUG:-"0"}" -eq 1 ]]
+  then
+    __DEBUG_COUNTER=$((__DEBUG_COUNTER+1))
+    {
+      # Prefix debug message with "bug (U+1F41B)"
+      printf "🐛  %s " "${__DEBUG_COUNTER}"
+      "${@}"
+      printf "―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――\\n"
+    } 1>&2
+  fi
+}
+
+###############################################################################
+# Error Messaging
+###############################################################################
+
+# _exit_1()
+#
+# Usage:
+#   _exit_1 <command>
+#
+# Description:
+#   Exit with status 1 after executing the specified with output redirected
+#   to standard error. The command is expected to print a message and should
+#   typically be either `echo`, `printf`, or `cat`.
+_exit_1() {
+  {
+    printf "%s " "$(tput setaf 1)!$(tput sgr0)"
+    "${@}"
+  } 1>&2
+  exit 1
+}
+
+# _return_1()
+#
+# Usage:
+#   _return_1 <command>
+#
+# Description:
+#   Return with status 1 after executing the specified with output redirected
+#   to standard error. The command is expected to print a message and should
+#   typically be either `echo`, `printf`, or `cat`.
+_return_1() {
+  {
+    printf "%s " "$(tput setaf 1)!$(tput sgr0)"
+    "${@}"
+  } 1>&2
+  return 1
+}
+
+# _warn()
+#
+# Usage:
+#   _warn <command>
+#
+# Description:
+#   Print the specified command with output redirected to standard error.
+#   The command is expected to print a message and should typically be either
+#   `echo`, `printf`, or `cat`.
+_warn() {
+  {
+    printf "%s " "$(tput setaf 1)!$(tput sgr0)"
+    "${@}"
+  } 1>&2
+}
+
+###############################################################################
+# Helpers
+###############################################################################
+
+# Space and tab for regular expressions
+#
+# sed regular expressions have slightly different behaviors dependending on
+# the environment, and POSIX [[:space:]] matches whitespace characters other
+# than just space and tab. These variables provide an easier, portable way to
+# test for just these two characters.
+export _TAB_=$'\t'
+export _SPACE_=$' '
+export _TAB_SPACE_="${_TAB_}${_SPACE_}"
+export _TAB_SPACE_CC_="[${_TAB_SPACE_}]"
+
+# _contains()
+#
+# Usage:
+#   _contains "${item}" "${list[@]}"
+#
+# Returns:
+#   0  If the item is included in the list.
+#   1  If not.
+_contains() {
+  local _query="${1:-}"
+  shift
+
+  if [[ -z "${_query}"  ]] ||
+     [[ -z "${*:-}"     ]]
+  then
+    return 1
+  fi
+
+  for __element in "${@}"
+  do
+    [[ "${__element}" == "${_query}" ]] && return 0
+  done
+
+  return 1
+}
+
+# _download_from()
+#
+# Usage:
+#   _download_from <url> [<outfile>]
+#
+# Description:
+#   Download the file at <url> and print to standard output or <outfile>.
+#   Uses `curl` if available, falling back to `wget`.
+_download_from() {
+  local _downloaded=0
+  local _target_path="${2:-}"
+  local _url="${1:-}"
+
+  if [[ -z "${_url}" ]] ||
+     [[ ! "${_url}" =~ ^ftp|^http|^file|^mailto|^news|^telnet|^gopher ]]
+  then
+    return 1
+  fi
+
+  if [[ -n "${_target_path}" ]]
+  then
+    if hash "curl" 2>/dev/null
+    then
+      curl -s -L "${_url}" -o "${_target_path}" &&
+        _downloaded=1
+    elif hash "wget" 2>/dev/null
+    then
+      wget --quiet -O "${_target_path}" "${_url}" 2>/dev/null &&
+        _downloaded=1
+    fi
+  else
+    if hash "curl" 2>/dev/null
+    then
+      curl -s -L "${_url}" &&
+        _downloaded=1
+    elif hash "wget" 2>/dev/null
+    then
+      wget --quiet -O - "${_url}" 2>/dev/null &&
+        _downloaded=1
+    fi
+  fi
+
+  if ! ((_downloaded))
+  then
+    return 1
+  fi
+}
+
+# _join()
+#
+# Usage:
+#   _join "," a b c
+#   _join "${an_array[@]}"
+#
+# Returns:
+#   The list or array of items joined into a string with elements divided by
+#   the optional separator if one is provided.
+#
+# More information:
+#   https://stackoverflow.com/a/17841619
+_join() {
+  local _delimiter="${1}"
+  shift
+  printf "%s" "${1}"
+  shift
+  printf "%s" "${@/#/${_delimiter}}" | tr -d '[:space:]'
+}
+
+# _print_entries()
+#
+# Usage:
+#   _print_entries <entries>
+_print_entries() {
+  local _input="${1:-}"
+  [[ -n "${_input}" ]] || return 0
+
+  local _newline=$'\n'
+
+  if [[ -n "${2:-}" ]]
+  then
+    _input+="${_newline}${2:-}"
+  fi
+
+  local _max_length=0
+
+  while IFS=$'\t ' read -r -a _parts
+  do
+    if [[ "${_parts[0]}" =~ disabled ]]
+    then
+      _parts=("${_parts[@]:1}")
+    fi
+
+    if [[ "${_max_length}" -lt "${#_parts[0]}" ]]
+    then
+      _max_length="${#_parts[0]}"
+    fi
+  done <<< "${_input}"
+
+  local _max_tab_equivalent="$((_max_length / 8))"
+
+  while IFS=$'\t ' read -r -a _parts
+  do
+    if [[ "${_parts[0]}" =~ disabled ]]
+    then
+      _parts=("${_parts[@]:1}")
+      printf "disabled:\\n"
+    fi
+
+    local _current_tab_equivalent=$((${#_parts[0]} / 8))
+    local _tab_count=$((_max_tab_equivalent - _current_tab_equivalent + 1))
+    local _tabs=
+    _tabs="$(printf "%*s" ${_tab_count} | tr " " '\t')"
+
+    if [[ -n "${_parts[2]:-}" ]]
+    then
+      printf "%s%s  %s\t%s\\n"  \
+        "${_parts[0]}"          \
+        "${_tabs}"              \
+        "${_parts[1]}"          \
+        "$(printf "%s" "${_parts[*]:2}" | tr '\r\n' ' ')"
+    else
+      printf "%s%s  %s\\n"  \
+        "${_parts[0]}"      \
+        "${_tabs}"          \
+        "${_parts[1]}"
+    fi
+
+  done <<< "${_input}"
+}
+
+# _sed_i()
+#
+# `sed -i` takes an extension on macOS, but that extension can cause errors in
+# GNU `sed`.
+#
+# https://stackoverflow.com/q/43171648
+# https://stackoverflow.com/a/16746032
+_sed_i() {
+  if sed --help >/dev/null 2>&1
+  then # GNU
+    sed -i "${@}"
+  else # BSD
+    sed -i '' "${@}"
+  fi
+}
+
+# _verify_write_permissions
+#
+# Usage:
+#   _verify_write_permissions
+#
+# Print a helpful error message when the specified operation can't be
+# performed due to the lack of write permissions. If `$_AUTO_SUDO` is enabled,
+# then run the command with sudo and exit with the command's exit value.
+_verify_write_permissions() {
+  if [[ ! -w "${HOSTS_PATH}" ]]
+  then
+    if ((_AUTO_SUDO))
+    then
+      local _my_path
+      _my_path="$(cd "$(dirname "$0")"; pwd)/${_ME}"
+
+      sudo "${_my_path}" "${_SUBCOMMAND}" "${_COMMAND_PARAMETERS[@]:-}"
+      exit $?
+    else
+      _exit_1 printf \
+"You don't have permission to perform this operation. Try again with:
+sudo !!\\n"
+    fi
+  fi
+}
+
+###############################################################################
+# desc
+###############################################################################
+
+# desc()
+#
+# Usage:
+#   desc <name> <description>
+#   desc --get <name>
+#
+# Options:
+#   --get  Print the description for <name> if one has been set.
+#
+# Examples:
+# ```
+#   desc "list" <<HEREDOC
+# Usage:
+#   ${_ME} list
+#
+# Description:
+#   List items.
+# HEREDOC
+#
+# desc --get "list"
+# ```
+#
+# Set or print a description for a specified command or function <name>. The
+# <description> text can be passed as the second argument or as standard input.
+#
+# To make the <description> text available to other functions, `desc()` assigns
+# the text to a variable with the format `$___desc_<name>`.
+#
+# When the `--get` option is used, the description for <name> is printed, if
+# one has been set.
+desc() {
+  _debug printf "desc() \${*}: %s\\n" "$@"
+  [[ -z "${1:-}" ]] && _exit_1 printf "desc(): No command name specified.\\n"
+
+  if [[ "${1}" == "--get" ]]
+  then # get ------------------------------------------------------------------
+    [[ -z "${2:-}" ]] && _exit_1 printf "desc(): No command name specified.\\n"
+
+    local _name="${2:-}"
+    local _desc_var="___desc_${_name}"
+
+    if [[ -n "${!_desc_var:-}" ]]
+    then
+      printf "%s\\n" "${!_desc_var}"
+    else
+      printf "No additional information for \`%s\`\\n" "${_name}"
+    fi
+  else # set ------------------------------------------------------------------
+    if [[ -n "${2:-}" ]]
+    then # argument is present
+      read -r -d '' "___desc_${1}" <<HEREDOC || true
+${2}
+HEREDOC
+
+      _debug printf "desc() set with argument: \${___desc_%s}\\n" "${1}"
+    else # no argument is present, so assume piped input
+      # `read` exits with non-zero status when a delimeter is not found, so
+      # avoid errors by ending statement with `|| true`.
+      read -r -d '' "___desc_${1}" || true
+
+      _debug printf "desc() set with pipe: \${___desc_%s}\\n" "${1}"
+    fi
+  fi
+}
+
+###############################################################################
+# Help
+###############################################################################
+
+# help ################################################################### help
+
+desc "help" <<HEREDOC
+Usage:
+  ${_ME} help [<command>]
+
+Description:
+  Display help information for ${_ME} or a specified command.
+HEREDOC
+help() {
+  if [[ -n "${1:-}" ]]
+  then
+    desc --get "${1}"
+  else
+    cat <<HEREDOC
+    __               __
+   / /_  ____  _____/ /______
+  / __ \\/ __ \\/ ___/ __/ ___/
+ / / / / /_/ (__  ) /_(__  )
+/_/ /_/\\____/____/\\__/____/
+
+A program for managing host file entries.
+
+Usage:
+  ${_ME} [<search string>]
+  ${_ME} add <ip> <hostname> [<comment>]
+  ${_ME} backups [create | (compare | delete | restore | show) <filename>]
+  ${_ME} block <hostname>...
+  ${_ME} completions (check | install [-d | --download] | uninstall)
+  ${_ME} disable (<ip> | <hostname> | <search string>)
+  ${_ME} disabled
+  ${_ME} edit
+  ${_ME} enable (<ip> | <hostname> | <search string>)
+  ${_ME} enabled
+  ${_ME} file
+  ${_ME} list [enabled | disabled | <search string>]
+  ${_ME} search <search string>
+  ${_ME} show (<ip> | <hostname> | <search string>)
+  ${_ME} subcommands [--raw]
+  ${_ME} remove (<ip> | <hostname> | <search string>) [--force]
+  ${_ME} unblock <hostname>...
+  ${_ME} --auto-sudo
+  ${_ME} -h | --help
+  ${_ME} --version
+
+Options:
+  --auto-sudo  Run write commands with \`sudo\` automatically.
+  -h --help    Display this help information.
+  --version    Display version information.
+
+Help:
+  ${_ME} help [<command>]
+
+More Information:
+  https://github.com/xwmx/hosts
+HEREDOC
+  fi
+}
+
+###############################################################################
+# Commands
+# ========.....................................................................
+#
+# Example command group structure:
+#
+# desc example ""   - Optional. A short description for the command.
+# example() { : }   - The command called by the user.
+#
+#
+# desc example <<HEREDOC
+#   Usage:
+#     ${_ME} example
+#
+#   Description:
+#     Print "Hello, World!"
+#
+#     For usage formatting conventions see:
+#     - http://docopt.org/
+#     - http://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap12.html
+# HEREDOC
+# example() {
+#   printf "Hello, World!\\n"
+# }
+#
+###############################################################################
+
+# add ##################################################################### add
+
+desc "add" <<HEREDOC
+Usage:
+  ${_ME} add <ip> <hostname> [<comment>]
+
+Description:
+  Add a given IP address and hostname pair, along with an optional comment.
+
+Exit status:
+  0   Entry successfully added.
+  1   Invalid parameters or entry exists.
+HEREDOC
+add() {
+  _debug printf "add() \${1}: %s\\n" "${1:-}"
+  _debug printf "add() \${2}: %s\\n" "${2:-}"
+  _debug printf "add() \${3}: %s\\n" "${3:-}"
+
+  _verify_write_permissions
+
+  local _ip="${1:-}"
+  local _hostname="${2:-}"
+  local _comment="${*:3}"
+  local _tabs=$'\t'
+
+  if [[ -z "${_ip:-}" ]]
+  then
+    help "add"
+    exit 1
+  elif [[ -z "${_hostname:-}" ]]
+  then
+    printf "Please include a hostname\\n"
+    help "add"
+    exit 1
+  elif grep \
+    -e "^${_ip}[[:space:]]\+${_hostname}$" \
+    -e "^${_ip}[[:space:]]\+${_hostname}[[:space:]]\+.*$" "${HOSTS_PATH}"
+  then
+    _exit_1 printf \
+      "Duplicate address/host combination, %s unchanged.\\n" \
+      "${HOSTS_PATH}"
+  else
+    if [[ "${#_ip}" -lt 8 ]]
+    then
+      _tabs=$'\t\t'
+    fi
+
+    if [[ -n "${_comment:-}" ]]
+    then
+      local _formatted_comment
+      _formatted_comment=$(_join " " "${_comment[@]}")
+
+      printf "%s%s%s\\t# %s\\n" \
+        "${_ip}"                \
+        "${_tabs}"              \
+        "${_hostname}"          \
+        "${_formatted_comment}" >> "${HOSTS_PATH}"
+      printf "Added:\\n%s%s%s\\t# %s\\n"  \
+        "${_ip}"                          \
+        "${_tabs}"                        \
+        "${_hostname}"                    \
+        "${_formatted_comment}"
+    else
+      printf "%s%s%s\\n"  \
+        "${_ip}"          \
+        "${_tabs}"        \
+        "${_hostname}" >> "${HOSTS_PATH}"
+      printf "Added:\\n%s%s%s\\n" \
+        "${_ip}"                  \
+        "${_tabs}"                \
+        "${_hostname}"
+    fi
+  fi
+}
+
+# backups ############################################################# backups
+
+desc "backups" <<HEREDOC
+Usage:
+  ${_ME} backups
+  ${_ME} backups create
+  ${_ME} backups compare <filename>
+  ${_ME} backups delete  <filename>
+  ${_ME} backups restore <filename> [--skip-backup]
+  ${_ME} backups show    <filename>
+
+Subcommands:
+  backups           List available backups.
+  backups create    Create a new backup of the hosts file.
+  backups compare   Compare a backup file with the current hosts file.
+  backups delete    Delete the specified backup.
+  backups restore   Replace the contents of the hosts file with a
+                    specified backup. The hosts file is automatically
+                    backed up before being overwritten unless the
+                    '--skip-backup' flag is specified.
+  backups show      Show the contents of the specified backup file.
+
+Description:
+  Manage backups.
+
+Exit status:
+  0   Success.
+  1   Invalid parameters or backup not found.
+HEREDOC
+backups() {
+  local _filename=
+  local _hosts_dirname=
+  _hosts_dirname="$(dirname "${HOSTS_PATH}")"
+  local _skip_backup=0
+  local _subcommand=
+
+  for __arg in "${@:-}"
+  do
+    case "${__arg}" in
+      --skip-backup)
+        _skip_backup=1
+        ;;
+      compare|create|delete|restore|show)
+        _subcommand="${__arg}"
+        ;;
+      *)
+        if [[ -z "${_filename:-}" ]]
+        then
+          _filename="${__arg}"
+        fi
+        ;;
+    esac
+  done
+
+  case "${_subcommand}" in
+    compare)
+      if [[ -z "${_filename:-}" ]]
+      then
+        help "backups"
+        exit 1
+      elif [[ ! -e "${_hosts_dirname}/${_filename}" ]]
+      then
+        _exit_1 printf "Backup not found: %s\\n" "${_filename:-}"
+      fi
+
+      diff -u "${HOSTS_PATH}" "${_hosts_dirname}/${_filename}"
+      ;;
+    create)
+      _verify_write_permissions
+
+      local _timestamp
+      _timestamp="$(date +"%Y%m%d%H%M%S")"
+
+      cp "${HOSTS_PATH}" "${HOSTS_PATH}--backup-${_timestamp}" && \
+        printf "Backed up to %s--backup-%s\\n" "${HOSTS_PATH}" "${_timestamp}"
+      ;;
+    delete)
+      if [[ -z "${_filename:-}" ]]
+      then
+        help "backups"
+        exit 1
+      fi
+
+      _verify_write_permissions
+
+      if [[ "${HOSTS_PATH}" != "${_hosts_dirname}/${_filename:-}" ]] &&
+         [[ -e "${_hosts_dirname}/${_filename:-}"                 ]]
+      then
+        rm "${_hosts_dirname}/${_filename:-}" &&
+          printf "Backup deleted: %s\\n" "${_hosts_dirname}/${_filename:-}"
+      else
+        _exit_1 printf "Backup not found: %s\\n" "${_filename:-}"
+      fi
+      ;;
+    restore)
+      if [[ -z "${_filename:-}" ]]
+      then
+        help "backups"
+        exit 1
+      elif [[ ! -e "${_hosts_dirname}/${_filename}" ]]
+      then
+        _exit_1 printf "Backup not found: %s\\n" "${_filename:-}"
+      fi
+
+      _verify_write_permissions
+
+      if ! ((_skip_backup))
+      then
+        backups create
+      fi
+
+      cat "${_hosts_dirname}/${_filename}" > "${HOSTS_PATH}" &&
+        printf "Restored from backup: %s\\n" "${_filename}"
+      ;;
+    show)
+      if [[ -z "${_filename:-}" ]]
+      then
+        help "backups"
+        exit 1
+      elif [[ ! -e "${_hosts_dirname}/${_filename}" ]]
+      then
+        _exit_1 printf "Backup not found: %s\\n" "${_filename:-}"
+      fi
+
+      cat "${_hosts_dirname}/${_filename:-}"
+      ;;
+    *)
+      local _filenames=()
+
+      set +f
+      for __filename in $(cd "${_hosts_dirname}" && ls -1 hosts* 2> /dev/null)
+      do
+        if [[ "${__filename:-}" != "hosts"              ]] &&
+           [[ ! "${__filename:-}" =~ ^hosts_test..{6}$  ]]
+        then
+          _filenames+=("${__filename:-}")
+        fi
+      done
+      set -f
+
+      if ((${#_filenames[@]}))
+      then
+        for __filename in "${_filenames[@]:-}"
+        do
+          printf "%s\\n" "${__filename}"
+        done
+      else
+        printf \
+          "No backups found. Create a new backup:\\n %s backups create\\n" \
+          "${_ME}"
+      fi
+      ;;
+  esac
+}
+
+# block ################################################################# block
+
+desc "block" <<HEREDOC
+Usage:
+  ${_ME} block <hostname>...
+
+Description:
+  Block one or more hostnames by adding new entries assigned to \`127.0.0.1\`
+  for IPv4 and both \`fe80::1%lo0\` and \`::1\` for IPv6.
+
+Exit status:
+  0   <hostname> successfully blocked.
+  1   Invalid parameters or entry exists.
+HEREDOC
+block() {
+  _verify_write_permissions
+
+  if [[ -z "${1:-}" ]]
+  then
+    help "block"
+    exit 1
+  fi
+
+  for __hostname in "${@}"
+  do
+    add 127.0.0.1 "${__hostname}"
+    # block IPv6
+    add "fe80::1%lo0" "${__hostname}"
+    add "::1" "${__hostname}"
+  done
+}
+
+# completions ##################################################### completions
+
+desc "completions" <<HEREDOC
+Usage:
+  ${_ME} completions (check | install [-d | --download] | uninstall)
+
+Options:
+  -d, --download  Download the completion scripts and install.
+
+Description:
+  Manage completion scripts. For more information, visit:
+  https://github.com/${_REPO}/blob/master/etc/README.md
+
+Exit status:
+  0   Completions successfully installed.
+  1   Invalid parameters or other error.
+HEREDOC
+completions() {
+  local _BASH_COMP_NAME="hosts"
+  local _ZSH_COMP_NAME="_hosts"
+
+  # Usage: _completions_check
+  _completions_check() {
+    local _bash_completion_path=
+    _bash_completion_path="$(_get_bash_completion_path)"
+
+    local _exists=0
+
+    if [[ -n "${_bash_completion_path:-}" ]] &&
+       [[ -d "${_bash_completion_path}"   ]]
+    then
+      if [[ -w "${_bash_completion_path}"   ]]
+      then
+        if [[ -e "${_bash_completion_path}/${_BASH_COMP_NAME}" ]]
+        then
+          _exists=1
+          printf "Exists: %s\\n" "${_bash_completion_path}/${_BASH_COMP_NAME}"
+        fi
+      else
+        _warn printf "Permission denied: %s\\n" "${_bash_completion_path}"
+      fi
+    fi
+
+    local _zsh_completion_path="/usr/local/share/zsh/site-functions"
+
+    if [[ -d "${_zsh_completion_path}" ]]
+    then
+      if [[ -w "${_zsh_completion_path}" ]]
+      then
+        if [[ -e "${_zsh_completion_path}/${_ZSH_COMP_NAME}" ]]
+        then
+          _exists=1
+          printf "Exists: %s\\n" "${_zsh_completion_path}/${_ZSH_COMP_NAME}"
+        fi
+      else
+        _warn printf "Permission denied: %s\\n" "${_zsh_completion_path}"
+      fi
+    fi
+
+    if ! ((_exists))
+    then
+      _exit_1 printf "Completion scripts not found.\\n"
+    fi
+  }
+
+  # Usage: _get_bash_completion_path
+  _get_bash_completion_path() {
+    local _bash_completion_path=
+
+    if [[ -n "${BASH_COMPLETION_COMPAT_DIR:-}" ]]
+    then
+      _bash_completion_path="${BASH_COMPLETION_COMPAT_DIR}"
+    fi
+
+    if [[ -z "${_bash_completion_path:-}" ]]
+    then
+      local _maybe_path
+      _maybe_path="$(
+        pkg-config \
+          --variable=completionsdir bash-completion 2>/dev/null || true
+      )"
+
+      if [[ -n "${_maybe_path:-}" ]]
+      then
+        _bash_completion_path="${_maybe_path}"
+      fi
+    fi
+
+    if [[ -z "${_bash_completion_path:-}"       ]] &&
+       [[ -d "/usr/local/etc/bash_completion.d" ]]
+    then
+      _bash_completion_path="/usr/local/etc/bash_completion.d"
+    fi
+
+    if [[ -z "${_bash_completion_path:-}" ]] &&
+       [[ -d "/etc/bash_completion.d"     ]]
+    then
+      _bash_completion_path="/etc/bash_completion.d"
+    fi
+
+    printf "%s\\n" "${_bash_completion_path:-}"
+  }
+
+  # Usage: _completions_install [--download]
+  _completions_install() {
+    local _download=0
+    if [[ "${1:-}" == "--download" ]]
+    then
+      _download=1
+    fi
+
+    local _my_path="${0}"
+
+    if [[ -L "${_my_path}" ]]
+    then
+      if hash "realpath" 2>/dev/null
+      then
+        _my_path="$(realpath "${_my_path}")"
+      else
+        _my_path="$(readlink "${_my_path}")"
+      fi
+    fi
+
+    local _my_dir=
+    _my_dir="$(cd "$(dirname "${_my_path}")"; pwd)"
+    if [[ -z "${_my_dir}" ]] || [[ ! -d "${_my_dir}" ]]
+    then
+      exit 1
+    fi
+
+    if [[ -z "${_REPO:-}" ]] || [[ -z "${_REPO_RAW_URL:-}" ]]
+    then
+      _exit_1 printf "Source Git repository not configured.\\n"
+    fi
+
+    for __shell in bash zsh
+    do
+      local _completion_source="${_my_dir}/etc/${_ME}-completion.${__shell}"
+
+      if ((_download))
+      then
+        if [[ ! -f "${_completion_source}" ]]
+        then
+          _completion_source="$(mktemp)"
+          local _completion_url="${_REPO_RAW_URL}/etc/${_ME}-completion.${__shell}"
+
+          if ! _download_from "${_completion_url}" "${_completion_source}"
+          then
+            _exit_1 printf "Unable to download Completion script from %s\\n" \
+              "${_completion_source}"
+          fi
+        fi
+      fi
+
+      if [[ ! -f "${_completion_source}" ]]
+      then
+        cat <<HEREDOC
+Unable to find source ${__shell} completion script. You can try downloading
+and installing the latest version with the following command (\`sudo\` might
+be necessary):
+  ${_ME} completions install --download
+
+More information: ${__shell}
+  https://github.com/${_REPO}/blob/master/etc/README.md
+HEREDOC
+      else
+        local _completion_path=
+        local _completion_target=
+        if [[ "${__shell}" == "bash" ]]
+        then
+          _completion_path="$(_get_bash_completion_path)"
+          _completion_target="${_completion_path}/${_BASH_COMP_NAME}"
+        elif [[ "${__shell}" == "zsh" ]]
+        then
+          _completion_path="/usr/local/share/zsh/site-functions"
+          _completion_target="${_completion_path}/${_ZSH_COMP_NAME}"
+        fi
+
+        if [[ -n "${_completion_path:-}" ]] &&
+           [[ -d "${_completion_path}"   ]]
+        then
+          if [[ -w "${_completion_path}" ]]
+          then
+            if [[ ! -e "${_completion_target}" ]]
+            then
+              cp \
+                "${_completion_source}" \
+                "${_completion_target}"
+              chmod +r "${_completion_target}"
+              printf "Completion script installed: %s\\n" \
+                "${_completion_target}"
+            else
+              _warn printf "Exists: %s\\n" "${_completion_target}"
+            fi
+          else
+            _warn printf "Permission denied: %s\\n" "${_completion_path}"
+          fi
+        fi
+      fi
+    done
+  }
+
+  # Usage: _completions_uninstall
+  _completions_uninstall() {
+    local _completion_path=
+    local _completion_target=
+
+    for __shell in bash zsh
+    do
+      if [[ "${__shell}" == "bash" ]]
+      then
+        _completion_path="$(_get_bash_completion_path)"
+        _completion_target="${_completion_path}/${_BASH_COMP_NAME}"
+      elif [[ "${__shell}" == "zsh" ]]
+      then
+        _completion_path="/usr/local/share/zsh/site-functions"
+        _completion_target="${_completion_path}/${_ZSH_COMP_NAME}"
+      fi
+
+      if [[ -n "${_completion_path:-}" ]] &&
+         [[ -d "${_completion_path}"   ]]
+      then
+        if [[ -w "${_completion_path}"   ]] &&
+           [[ -w "${_completion_target}" ]]
+        then
+          if [[ -f "${_completion_target}" ]]
+          then
+            rm "${_completion_target}"
+            printf "Completion script removed: %s\\n" \
+              "${_completion_target}"
+          fi
+        else
+          _warn printf "Permission denied: %s\\n" "${_completion_path}"
+        fi
+      fi
+    done
+  }
+
+  local _subcommand="${1:-}"
+
+  case "${_subcommand}" in
+    check)
+      _completions_check
+      ;;
+    install)
+      if [[ "${2:-}" =~ ^-d|--download$ ]]
+      then
+        _completions_install --download
+      else
+        _completions_install
+      fi
+      ;;
+    uninstall)
+      _completions_uninstall
+      ;;
+    *)
+      help "completions"
+      return 0
+      ;;
+  esac
+}
+
+# disable ############################################################# disable
+
+desc "disable" <<HEREDOC
+Usage:
+  ${_ME} disable (<ip> | <hostname> | <search string>)
+
+Description:
+  Disable one or more entries based on a given ip address, hostname, or
+  search string.
+
+Exit status:
+  0   Entry successfully disabled.
+  1   Invalid parameters or entry not found.
+HEREDOC
+disable() {
+  _verify_write_permissions
+
+  local _search_string="${1:-}"
+
+  if [[ -z "${_search_string:-}" ]]
+  then
+    help "disable"
+    exit 1
+  else
+    _debug printf "disable() \${_search_string}: %s\\n" "${_search_string}"
+
+    # Regular Expression Notes
+    #
+    # - Note double periods in regular expression in order to emulate /.+/,
+    #   which apparently doesn't work properly with all versions of sed.
+
+    local _regex_ip
+    _regex_ip="^\\(${_search_string}[${_TAB_SPACE_}]..*\\)$"
+
+    local _regex_commented_hostname
+    _regex_commented_hostname="^\\([^#]..*[${_TAB_SPACE_}]${_search_string}[${_TAB_SPACE_}]..*\\)$"
+
+    local _regex_hostname
+    _regex_hostname="^\\([^#]..*[${_TAB_SPACE_}]${_search_string}\\)$"
+
+    local _targets
+    _targets=$(
+      sed -n                                      \
+        -e "s/${_regex_ip}/\\1/p"                 \
+        -e "s/${_regex_commented_hostname}/\\1/p" \
+        -e "s/${_regex_hostname}/\\1/p"           \
+        "${HOSTS_PATH}"
+    )
+
+    _debug printf "disable() \${_targets}: %s\\n" "${_targets}"
+
+    if [[ -z "${_targets:-}" ]]
+    then
+      _exit_1 printf "Not found: %s\\n" "${_search_string}"
+    fi
+
+    printf "Disabling:\\n%s\\n" "${_targets}"
+
+    _sed_i                                                    \
+      -e "s/${_regex_ip}/\\#disabled: \\1/g"                  \
+      -e "s/${_regex_commented_hostname}/\\#disabled: \\1/g"  \
+      -e "s/${_regex_hostname}/\\#disabled: \\1/g"            \
+      "${HOSTS_PATH}"
+  fi
+}
+
+# disabled ########################################################### disabled
+
+desc "disabled" <<HEREDOC
+Usage:
+  ${_ME} disabled
+
+Description:
+  List all disabled entries. This is an alias for \`hosts list disabled\`.
+
+Exit status:
+  0   One or more disabled entries found.
+  1   Invalid parameters or no disabled entries found.
+HEREDOC
+disabled() {
+  list disabled
+}
+
+# edit ################################################################### edit
+
+desc "edit" <<HEREDOC
+Usage:
+  ${_ME} edit
+
+Description:
+  Open the ${HOSTS_PATH} file in your \$EDITOR.
+HEREDOC
+edit() {
+  _verify_write_permissions
+
+  if [[ -z "${EDITOR}" ]]
+  then
+    _exit_1 printf "\$EDITOR not set.\\n"
+  else
+    "${EDITOR}" "${HOSTS_PATH}"
+  fi
+}
+
+# enable ############################################################### enable
+
+desc "enable" <<HEREDOC
+Usage:
+  ${_ME} enable (<ip> | <hostname> | <search string>)
+
+Description:
+  Enable one or more disabled entries based on a given ip address, hostname,
+  or search string.
+
+Exit status:
+  0   Entry successfully enabled.
+  1   Invalid parameters or entry not found.
+HEREDOC
+enable() {
+  _verify_write_permissions
+
+  local _search_string="${1:-}"
+
+  if [[ -z "${_search_string:-}" ]]
+  then
+    help "enable"
+    exit 1
+  else
+    _debug printf "enable() \${_search_string}: %s\\n" "${_search_string}"
+
+    # Regular Expression Notes
+    #
+    # - Note double periods in regular expression in order to emulate /.+/,
+    #   which apparently doesn't work properly with all versions of sed.
+
+    local _regex_ip
+    _regex_ip="^\\#disabled: \\(${_search_string}[${_TAB_SPACE_}]..*\\)$"
+
+    local _regex_commented_hostname
+    _regex_commented_hostname="^\\#disabled: \\(..*[${_TAB_SPACE_}]${_search_string}[${_TAB_SPACE_}]..*\\)$"
+
+    local _regex_hostname
+    _regex_hostname="^\\#disabled: \\(..*[${_TAB_SPACE_}]${_search_string}\\)$"
+
+    local _targets
+    _targets=$(
+      sed -n                                      \
+        -e "s/${_regex_ip}/\\1/p"                 \
+        -e "s/${_regex_commented_hostname}/\\1/p" \
+        -e "s/${_regex_hostname}/\\1/p"           \
+        "${HOSTS_PATH}"
+    )
+
+    _debug printf "enable() \${targets}: %s\\n" "${_targets}"
+
+    if [[ -z "${_targets:-}" ]]
+    then
+      _exit_1 printf "Not found: %s\\n" "${_search_string}"
+    fi
+
+    printf "Enabling:\\n%s\\n" "${_targets}"
+
+    _sed_i                                      \
+      -e "s/${_regex_ip}/\\1/g"                 \
+      -e "s/${_regex_commented_hostname}/\\1/g" \
+      -e "s/${_regex_hostname}/\\1/g"           \
+      "${HOSTS_PATH}"
+  fi
+}
+
+# enabled ############################################################# enabled
+
+desc "enabled" <<HEREDOC
+Usage:
+  ${_ME} enabled
+
+Description:
+  List all enabled entries. This is an alias for \`hosts list enabled\`.
+
+Exit status:
+  0   One or more enabled entries found.
+  1   Invalid parameters or no enabled entries found.
+HEREDOC
+enabled() {
+  list enabled
+}
+
+# file ################################################################### file
+
+desc "file" <<HEREDOC
+Usage:
+  ${_ME} file
+
+Description:
+  Print the entire contents of the ${HOSTS_PATH} file.
+HEREDOC
+file() {
+  cat "${HOSTS_PATH}"
+}
+
+# list ################################################################### list
+
+desc "list" <<HEREDOC
+Usage:
+  ${_ME} list [enabled | disabled | <search string>]
+
+Description:
+  List the existing IP / hostname pairs, optionally limited to a specified
+  state. When provided with a seach string, all matching enabled entries will
+  be printed.
+
+Exit status:
+  0   One or more matching entries found.
+  1   Invalid parameters or entry not found.
+HEREDOC
+list() {
+  local _disabled_entries
+  _disabled_entries=$(
+    sed -n "s/^\\#disabled: \\(.*\\)$/\\1/p" "${HOSTS_PATH}"
+  )
+
+  # NOTE: use separate expressions since using `|` for the 'or' results in
+  # inconsistent behavior.
+  local _enabled_entries
+  _enabled_entries="$(
+    grep -v -e '^$' -e '^\s*\#' "${HOSTS_PATH}"
+  )"
+
+  if [[ -n "${1:-}" ]]
+  then
+    if [[ "${1}" == "disabled" ]]
+    then
+      [[ -z "${_disabled_entries}" ]] && return 1
+      _print_entries "${_disabled_entries}"
+    elif [[ "${1}" == "enabled" ]]
+    then
+      [[ -z "${_enabled_entries}" ]] && return 1
+      _print_entries "${_enabled_entries}"
+    else
+      show "${1}"
+    fi
+  else
+    [[ -z "${_enabled_entries}" ]] &&
+    [[ -z "${_enabled_entries}" ]] &&
+      return 1
+
+    _print_entries "${_enabled_entries:-}"
+
+    if [[ -n "${_disabled_entries:-}" ]]
+    then
+      [[ -n "${_enabled_entries:-}" ]] && printf "\\n"
+      printf "Disabled:\\n"
+      printf "%s\\n" "---------"
+      _print_entries "${_disabled_entries}"
+    fi
+  fi
+}
+
+# remove ############################################################### remove
+
+desc "remove" <<HEREDOC
+Usage:
+  ${_ME} remove (<ip> | <hostname> | <search string>) [--force]
+  ${_ME} remove <ip> <hostname>
+
+Options:
+  --force  Skip the confirmation prompt.
+
+Description:
+  Remove one or more entries based on a given IP address, hostname, or search
+  string. If an IP and hostname are both provided, only entries matching the
+  IP and hostname pair will be removed.
+
+Exit status:
+  0   Entry successfully removed.
+  1   Invalid parameters or entry not found.
+HEREDOC
+remove() {
+  _verify_write_permissions
+
+  local _is_search_pair=0
+  local _force_skip_prompt=0
+  local _arguments=()
+  local _search_ip=
+  local _search_hostname=
+  local _search_string=
+
+  _debug printf "remove() \${1}: %s\\n" "${1:-}"
+  _debug printf "remove() \${2}: %s\\n" "${2:-}"
+
+  for __arg in "${@:-}"
+  do
+    case "${__arg}" in
+      --force)
+        _force_skip_prompt=1
+        ;;
+      *)
+        _arguments+=("${__arg}")
+        ;;
+    esac
+  done
+
+  _debug printf "remove() \${arguments[1]}: %s\\n" "${_arguments[0]:-}"
+  _debug printf "remove() \${arguments[2]}: %s\\n" "${_arguments[1]:-}"
+
+  if [[ -z "${_arguments[0]:-}" ]]
+  then
+    help "remove"
+    exit 1
+  elif [[ -n "${_arguments[1]:-}" ]]
+  then
+    _search_ip="${_arguments[0]}"
+    _search_hostname="${_arguments[1]}"
+    _is_search_pair=1
+
+    _debug printf "remove() \${_is_search_pair}: %s\\n" "${_is_search_pair}"
+  else
+    _search_string="${_arguments[0]:-}"
+
+    _debug printf "remove() \${_search_string}: %s\\n" "${_search_string}"
+  fi
+
+  # Regular Expression Notes
+  #
+  # Note double periods in regular expression in order to emulate /.+/,
+  # which apparently doesn't work properly with all versions of sed.
+
+  # IP / Hostname pair regular expressions:
+  local _regex_ip_hostname_commented
+  _regex_ip_hostname_commented="^\\(${_search_ip}[${_TAB_SPACE_}]*${_search_hostname}[${_TAB_SPACE_}]..*\\)$"
+
+  local _regex_ip_hostname
+  _regex_ip_hostname="^\\(${_search_ip}[${_TAB_SPACE_}]*${_search_hostname}\\)$"
+
+  # Search string regular expressions:
+  local _regex_ip
+  _regex_ip="^\\(${_search_string}[${_TAB_SPACE_}]..*\\)$"
+
+  local _regex_commented_hostname
+  _regex_commented_hostname="^\\(..*[${_TAB_SPACE_}]${_search_string}[${_TAB_SPACE_}]..*\\)$"
+
+  local _regex_hostname
+  _regex_hostname="^\\(..*[${_TAB_SPACE_}]${_search_string}\\)$"
+
+  local _target_entries
+
+  if ((_is_search_pair))
+  then
+    _target_entries=$(
+      sed -n                                          \
+        -e "s/${_regex_ip_hostname_commented}/\\1/p"  \
+        -e "s/${_regex_ip_hostname}/\\1/p"            \
+        "${HOSTS_PATH}"
+    )
+  else
+    _target_entries=$(
+      sed -n                                      \
+        -e "s/${_regex_ip}/\\1/p"                 \
+        -e "s/${_regex_commented_hostname}/\\1/p" \
+        -e "s/${_regex_hostname}/\\1/p"           \
+        "${HOSTS_PATH}"
+    )
+  fi
+
+  if [[ -z "${_target_entries:-}" ]]
+  then
+    _exit_1 printf "No matching entries found.\\n"
+  fi
+
+  if ! ((_force_skip_prompt))
+  then
+    printf "Removing the following entries:\\n%s\\n" "${_target_entries}"
+
+    while true
+    do
+      read -r -p "Are you sure you want to proceed? [y/N] " _yn
+
+      case "${_yn}" in
+        [Yy]* )
+          break
+          ;;
+        * )
+          printf "Exiting...\\n"
+          exit 0
+          ;;
+      esac
+    done
+  fi
+
+  if ((_is_search_pair))
+  then
+    _sed_i                                    \
+      -e "/${_regex_ip_hostname_commented}/d" \
+      -e "/${_regex_ip_hostname}/d"           \
+      "${HOSTS_PATH}"
+  else
+    _sed_i                                    \
+      -e "/${_regex_ip}/d"                    \
+      -e "/${_regex_commented_hostname}/d"    \
+      -e "/${_regex_hostname}/d"              \
+      "${HOSTS_PATH}"
+  fi
+
+  printf "Removed:\\n%s\\n" "${_target_entries}"
+}
+desc "delete" "$(desc --get 'remove')"
+delete() { remove "${@}"; }
+
+# search ############################################################### search
+
+desc "search" <<HEREDOC
+Usage:
+  ${_ME} search <search string>
+
+Description:
+  Search entries for <search string>.
+
+Exit status:
+  0   One or more matching entries found.
+  1   Invalid parameters or entry not found.
+HEREDOC
+search() {
+  if [[ -z "${1:-}" ]]
+  then
+    help "search"
+    exit 1
+  fi
+
+  list "$@"
+}
+
+# show ################################################################### show
+
+desc "show" <<HEREDOC
+Usage:
+  ${_ME} show (<ip> | <hostname> | <search string>)
+
+Description:
+  Print entries matching a given IP address, hostname, or search string.
+
+Exit status:
+  0   One or more matching entries found.
+  1   Invalid parameters or entry not found.
+HEREDOC
+show() {
+  if [[ -n "${1:-}" ]]
+  then
+    # Run `sed` before `grep` to avoid conflict that supresses `sed` output.
+    local _disabled_entries
+    _disabled_entries="$(
+      sed -n "s/^\\#disabled: \\(.*${1}.*\\)$/\\1/p" "${HOSTS_PATH}"
+    )"
+
+    local _enabled_entries
+    _enabled_entries="$(
+      grep --invert-match "^#" "${HOSTS_PATH}" | grep "${1}" || true
+    )"
+
+    if [[ -z "${_disabled_entries}" ]] &&
+       [[ -z "${_enabled_entries}"  ]]
+    then
+      _return_1 printf "No matching entries.\\n"
+    fi
+
+    _print_entries "${_enabled_entries}"
+
+    if [[ -n "${_disabled_entries}" ]]
+    then
+      [[ -n "${_enabled_entries}" ]] && printf "\\n"
+      printf "Disabled:\\n"
+      printf "%s\\n" "---------"
+      _print_entries "${_disabled_entries}"
+    fi
+  else
+    help show
+    exit 1
+  fi
+}
+
+# subcommands ##################################################### subcommands
+
+desc "subcommands" <<HEREDOC
+Usage:
+  ${_ME} subcommands [--raw]
+
+Options:
+  --raw  Display the subcommand list without formatting.
+
+Description:
+  Display the list of available subcommands.
+HEREDOC
+subcommands() {
+  if [[ "${1:-}" == "--raw" ]]
+  then
+    printf "%s\\n" "${_DEFINED_SUBCOMMANDS[@]}"
+  else
+    printf "Available subcommands:\\n"
+    printf "  %s\\n" "${_DEFINED_SUBCOMMANDS[@]}"
+  fi
+}
+desc "commands" "$(desc --get 'subcommands')"
+commands() { subcommands "${@}"; }
+
+# unblock ############################################################# unblock
+
+desc "unblock" <<HEREDOC
+Usage:
+  ${_ME} unblock <hostname>...
+
+Description:
+  Unblock one or more hostnames by removing the entries from the hosts file.
+
+Exit status:
+  0   <hostname> successfully unblocked.
+  1   Invalid parameters or entry not found.
+HEREDOC
+unblock() {
+  _verify_write_permissions
+
+  if [[ -z "${1:-}" ]]
+  then
+    help unblock
+    exit 1
+  fi
+
+  for __hostname in "${@}"
+  do
+    remove 127.0.0.1      "${__hostname}" --force
+    # unblock IPv6
+    remove "fe80::1%lo0"  "${__hostname}" --force
+    remove "::1"          "${__hostname}" --force
+  done
+}
+
+# version ############################################################# version
+
+desc "version" <<HEREDOC
+Usage:
+  ${_ME} (version | --version)
+
+Description:
+  Display the current program version.
+
+  To save you the trouble, the current version is ${_VERSION}
+HEREDOC
+version() {
+  printf "%s\\n" "${_VERSION}"
+}
+
+###############################################################################
+# Load Program & Run
+###############################################################################
+
+# Parse Options ###############################################################
+
+_SUBCOMMAND=
+_COMMAND_PARAMETERS=()
+_USE_DEBUG=0
+_AUTO_SUDO=0
+
+_SUBCOMMANDS=(
+  add
+  backups
+  block
+  commands
+  completions
+  delete
+  disable
+  disabled
+  edit
+  enable
+  enabled
+  file
+  help
+  list
+  remove
+  search
+  show
+  subcommands
+  unblock
+  version
+)
+_SUBCOMMANDS_PATTERN="$(_join '|' "${_SUBCOMMANDS[@]}")"
+
+while [[ ${#} -gt 0 ]]
+do
+  __opt="${1}"
+
+  shift
+
+  case "${__opt}" in
+    -h|--help)
+      _SUBCOMMAND="help"
+      ;;
+    --version)
+      _SUBCOMMAND="version"
+      ;;
+    --debug)
+      _USE_DEBUG=1
+      ;;
+    --auto-sudo|--sudo)
+      _AUTO_SUDO=1
+      ;;
+    *)
+      if [[ -z "${_SUBCOMMAND:-}"                   ]] &&
+         [[ "${__opt:-}" =~ ${_SUBCOMMANDS_PATTERN} ]]
+      then
+        _SUBCOMMAND="${__opt}"
+      else
+        _COMMAND_PARAMETERS+=("${__opt}")
+      fi
+      ;;
+  esac
+done
+
+_debug printf              \
+  "\${_SUBCOMMAND}: %s\\n" \
+  "${_SUBCOMMAND}"
+_debug printf                           \
+  "\${_COMMAND_PARAMETERS[*]:-}: %s\\n" \
+  "${_COMMAND_PARAMETERS[*]:-}"
+
+# Load Commands ###############################################################
+
+# Initialize $_DEFINED_SUBCOMMANDS array.
+_DEFINED_SUBCOMMANDS=()
+
+# _load_subcommands()
+#
+# Usage:
+#   _load_subcommands
+#
+# Loads all of the commands sourced in the environment.
+_load_subcommands() {
+  _debug printf "_load_subcommands(): entering...\\n"
+
+  local _function_list
+  _function_list=($(declare -F))
+
+  for __name in "${_function_list[@]}"
+  do
+    # Each element has the format `declare -f function_name`, so set the name
+    # to only the 'function_name' part of the string.
+    local _function_name
+    _function_name="$(printf "%s" "${__name}" | awk '{ print $3 }')"
+
+    # Add the function name to the $_DEFINED_SUBCOMMANDS array unless it starts
+    # with an underscore or is desc() since these are treated as having
+    # 'private' visibility.
+    if [[ ! "${_function_name}" =~ ^_(.*) ]] &&
+       [[ "${_function_name}" != "desc"   ]]
+    then
+      _DEFINED_SUBCOMMANDS+=("${_function_name}")
+    fi
+  done
+
+  _debug printf \
+    "_load_subcommands() \${_DEFINED_SUBCOMMANDS[*]:-}:\\n%s\\n" \
+    "${_DEFINED_SUBCOMMANDS[*]:-}"
+}
+
+# Main ########################################################################
+
+# _main()
+#
+# Usage:
+#   _main
+#
+# The primary function for starting the program.
+#
+# NOTE: must be called at end of program after all commands have been defined.
+_main() {
+  _debug printf "main(): entering...\\n"
+  _debug printf "main() \${_SUBCOMMAND} (upon entering): %s\\n" "${_SUBCOMMAND}"
+
+  if [[ -z "${_SUBCOMMAND}" ]]
+  then
+    _SUBCOMMAND="${HOSTS_DEFAULT_SUBCOMMAND}"
+  fi
+
+  _load_subcommands
+
+  if _contains "${_SUBCOMMAND}" "${_DEFINED_SUBCOMMANDS[@]:-}"
+  then
+    "${_SUBCOMMAND}" "${_COMMAND_PARAMETERS[@]:-}"
+  else
+    _exit_1 printf "Unknown subcommand: %s\\n" "${_SUBCOMMAND}"
+  fi
+}
+
+_main

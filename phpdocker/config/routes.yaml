@@ -1,0 +1,12 @@
+
+home:
+  path: /generator
+  controller: Symfony\Bundle\FrameworkBundle\Controller\RedirectController
+  defaults:
+    path: /
+    permanent: true
+
+generator:
+  path: /
+  controller: App\Controller\GeneratorController::create
+  methods: [GET, POST]

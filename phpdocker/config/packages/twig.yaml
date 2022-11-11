@@ -1,0 +1,11 @@
+twig:
+  default_path: '%kernel.project_dir%/templates'
+  globals:
+    google_analytics: '%env(GOOGLE_ANALYTICS)%'
+  paths:
+    - "%kernel.project_dir%/templates"
+    - "%kernel.project_dir%/src/PHPDocker/Template"
+
+when@test:
+  twig:
+    strict_variables: true
