@@ -39,7 +39,7 @@ COPY conf/xdebug.ini /etc/php/8.1/mods-available/xdebug.ini
 COPY conf/8.1/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY conf/8.1/default.conf /etc/nginx/sites-available/default
 COPY conf/8.1/www.conf /etc/php/8.1/fpm/pool.d/www.conf
-COPY github-oauth.json /root/.config/auth.json
+COPY github-oauth.json /root/.config/composer/auth.json
 
 # tweak php-fpm config
 RUN sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 100M/g' /etc/php/8.1/fpm/php.ini && \
